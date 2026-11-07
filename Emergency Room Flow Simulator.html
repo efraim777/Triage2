@@ -1,0 +1,735 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Emergency Department Patient Flow</title>
+  <style>
+    :root{
+      --bg:#edf2f7;
+      --panel:#ffffff;
+      --text:#111827;
+      --muted:#64748b;
+      --soft:#d7e1ef;
+      --accent:#2563eb;
+      --danger:#dc2626;
+      --canvas:#fbfdff;
+      --field:#ffffff;
+      --shadow:0 16px 40px rgba(15,23,42,.13);
+    }
+    body.dark{
+      --bg:#0f172a;
+      --panel:#172033;
+      --text:#f8fafc;
+      --muted:#a7b3c8;
+      --soft:#2b3854;
+      --accent:#60a5fa;
+      --danger:#fb7185;
+      --canvas:#0b1220;
+      --field:#0f172a;
+      --shadow:0 16px 40px rgba(0,0,0,.35);
+    }
+    *{box-sizing:border-box}
+    body{
+      margin:0;
+      min-height:100vh;
+      font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+      background:var(--bg);
+      color:var(--text);
+      overflow-x:hidden;
+    }
+    header{
+      position:sticky;
+      top:0;
+      z-index:20;
+      display:grid;
+      grid-template-columns:1fr 2.7fr;
+      gap:12px;
+      align-items:center;
+      padding:10px 14px;
+      background:rgba(255,255,255,.84);
+      backdrop-filter:blur(12px);
+      border-bottom:1px solid var(--soft);
+    }
+    body.dark header{background:rgba(15,23,42,.86)}
+    h1{
+      margin:0;
+      font-size:18px;
+      letter-spacing:-.02em;
+      line-height:1.1;
+    }
+    .subtitle{
+      margin-top:3px;
+      color:var(--muted);
+      font-size:12px;
+    }
+    .topControls{
+      display:flex;
+      justify-content:flex-end;
+      align-items:center;
+      gap:8px;
+      flex-wrap:wrap;
+    }
+    button,select,input,.chip{
+      border:1px solid var(--soft);
+      background:var(--field);
+      color:var(--text);
+      border-radius:12px;
+      padding:8px 10px;
+      font-size:13px;
+      outline:none;
+    }
+    button{
+      cursor:pointer;
+      font-weight:800;
+      transition:.18s transform,.18s opacity;
+    }
+    button:hover{transform:translateY(-1px)}
+    button.primary{background:var(--accent);border-color:var(--accent);color:white}
+    button.warn{background:var(--danger);border-color:var(--danger);color:white}
+    label{
+      display:grid;
+      gap:4px;
+      color:var(--muted);
+      font-size:11px;
+      font-weight:800;
+    }
+    .chip{
+      display:flex;
+      align-items:center;
+      gap:6px;
+      font-weight:800;
+      white-space:nowrap;
+    }
+    .dot{
+      width:10px;
+      height:10px;
+      display:inline-block;
+      border-radius:99px;
+      border:1px solid rgba(0,0,0,.25);
+    }
+    .red{background:#e11d48}
+    .orange{background:#f97316}
+    .yellow{background:#eab308}
+    .green{background:#22c55e}
+    .blue{background:#2563eb}
+    main{
+      display:grid;
+      gap:10px;
+      padding:10px 14px 12px;
+    }
+    .canvasWrap{
+      background:var(--panel);
+      border:1px solid var(--soft);
+      border-radius:24px;
+      box-shadow:var(--shadow);
+      padding:10px;
+      overflow-x:auto;
+      overflow-y:hidden;
+    }
+    /* The plan keeps its 1240×850 proportions and is sized by fitPlan() to the largest
+       size that fits both the page width and the window height below the header, so the
+       whole plan is visible on any monitor without zooming. Below PLAN_MIN_W it stops
+       shrinking and scrolls sideways instead, so text never gets too small to read. */
+    canvas{
+      display:block;
+      margin:0 auto;
+      width:100%;
+      height:auto;
+      aspect-ratio:1240/850;
+      background:var(--canvas);
+      border:1px solid var(--soft);
+      border-radius:18px;
+    }
+    .bottomPanel{
+      background:var(--panel);
+      border:1px solid var(--soft);
+      border-radius:22px;
+      box-shadow:var(--shadow);
+      padding:12px;
+    }
+    .bottomTitle{
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      gap:10px;
+      margin-bottom:10px;
+    }
+    .bottomTitle h2{
+      margin:0;
+      font-size:15px;
+    }
+    .status{
+      color:var(--muted);
+      font-size:12px;
+    }
+    .error{
+      color:var(--danger);
+      font-weight:900;
+      font-size:12px;
+    }
+    .grid{
+      display:grid;
+      grid-template-columns:repeat(6,minmax(100px,1fr));
+      gap:8px;
+      align-items:end;
+    }
+    input[type=number]{width:100%;padding:8px}
+    .modal{
+      position:fixed;
+      inset:0;
+      z-index:50;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      background:rgba(2,6,23,.68);
+      padding:16px;
+    }
+    .modalCard{
+      width:min(940px,96vw);
+      background:var(--panel);
+      border:1px solid var(--soft);
+      border-radius:26px;
+      box-shadow:0 30px 80px rgba(0,0,0,.35);
+      padding:22px;
+    }
+    .modalCard h2{
+      margin:0 0 6px;
+      font-size:26px;
+      letter-spacing:-.03em;
+    }
+    .modalCard p{
+      margin:0 0 16px;
+      color:var(--muted);
+    }
+    .modalGrid{
+      display:grid;
+      grid-template-columns:repeat(5,1fr);
+      gap:10px;
+      margin:14px 0;
+    }
+    .modalActions{
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      gap:10px;
+      margin-top:14px;
+    }
+    .groups{display:grid;gap:10px;margin:14px 0}
+    .bottomPanel .groups{margin:0}
+    .group{margin:0;border:1px solid var(--soft);border-radius:16px;padding:8px 12px 12px;min-width:0}
+    .group legend{padding:0 6px;color:var(--text);font-size:12px;font-weight:900;letter-spacing:.04em;text-transform:uppercase}
+    .groupFields{display:grid;grid-template-columns:repeat(5,minmax(120px,1fr));gap:8px;align-items:end}
+    /* Triage colours for intake labels; orange and yellow match the patient dots on the plan. */
+    label.lbl-red{color:#be123c}
+    label.lbl-orange{color:#f97316}
+    label.lbl-yellow{color:#eab308}
+    label.lbl-green{color:#15803d}
+    label.lbl-blue{color:#1d4ed8}
+    body.dark label.lbl-red{color:#fb7185}
+    body.dark label.lbl-orange{color:#ff9f1c}
+    body.dark label.lbl-yellow{color:#ffd60a}
+    body.dark label.lbl-green{color:#4ade80}
+    body.dark label.lbl-blue{color:#60a5fa}
+    .hidden{display:none!important}
+    @media(max-width:1080px){
+      header{grid-template-columns:1fr}
+      .topControls{justify-content:flex-start}
+      .grid,.modalGrid,.groupFields{grid-template-columns:repeat(2,1fr)}
+    }
+    @media(max-width:560px){
+      .grid,.modalGrid,.groupFields{grid-template-columns:1fr}
+      h1{font-size:16px}
+    }
+  </style>
+</head>
+<body>
+  <div id="configModal" class="modal">
+    <section class="modalCard">
+      <h2>Emergency Department Patient Flow</h2>
+      <p>Initial set-up. The triage mix percentages must add up to exactly 100%.</p>
+      <div class="groups" id="initialGrid"></div>
+      <div class="modalActions">
+        <div id="initialError" class="error"></div>
+        <button id="startBtn" class="primary">Start Simulation</button>
+      </div>
+    </section>
+  </div>
+
+  <header>
+    <div>
+      <h1>Emergency Department Patient Flow</h1>
+      <div class="subtitle">Top-down 2D simulation with anti-blocking in corridors and seats allocated by capacity.</div>
+    </div>
+    <div class="topControls">
+      <label>Speed
+        <select id="speedSelect">
+          <option value="0.55">Level 1</option>
+          <option value="0.8">Level 2</option>
+          <option value="1.15" selected>Level 3</option>
+          <option value="1.7">Level 4</option>
+          <option value="2.35">Level 5</option>
+        </select>
+      </label>
+      <button id="pauseBtn">Pause</button>
+      <button id="restartBtn" class="warn">End / Restart</button>
+      <label>Theme
+        <select id="themeSelect">
+          <option value="light">Light</option>
+          <option value="dark">Dark</option>
+        </select>
+      </label>
+      <div class="chip">Active: <span id="activeCount">0</span></div>
+      <div class="chip"><span class="dot red"></span>Immediate <span id="cntRed">0</span></div>
+      <div class="chip"><span class="dot orange"></span>Emergency <span id="cntOrange">0</span></div>
+      <div class="chip"><span class="dot yellow"></span>Urgent <span id="cntYellow">0</span></div>
+      <div class="chip"><span class="dot green"></span>Semi-Urgent <span id="cntGreen">0</span></div>
+      <div class="chip"><span class="dot blue"></span>Non-Urgent <span id="cntBlue">0</span></div>
+    </div>
+  </header>
+
+  <main>
+    <section class="canvasWrap">
+      <canvas id="simCanvas" width="1240" height="850"></canvas>
+    </section>
+
+    <section class="bottomPanel">
+      <div class="bottomTitle">
+        <h2>Parameters editable during the simulation</h2>
+        <div>
+          <span id="liveStatus" class="status">Changes applied live.</span>
+          <span id="liveError" class="error"></span>
+        </div>
+      </div>
+      <div class="groups" id="liveGrid"></div>
+    </section>
+  </main>
+
+<script>
+/*
+ Flujo de pacientes en una puerta de emergencia — versión revisada.
+ Simulación autónoma (sin red ni dependencias).
+ REGLA FUNDAMENTAL: la reserva lógica de plazas es independiente del trayecto dibujado.
+ El tiempo de simulación y las esperas se miden en unidades UNIT segundos simulados.
+ Los cambios de capacidad respetan a los pacientes existentes: se impide una nueva
+ admisión hasta que la ocupación baja por debajo del límite actualizado.
+*/
+'use strict';
+const $=id=>document.getElementById(id);
+const canvas=$('simCanvas'), ctx=canvas.getContext('2d');
+const UNIT=5, R=6.5, MIN=17.5, TRANSFER_LIMIT=.45*UNIT;
+// Ninguna transferencia puede permanecer indefinidamente en una abertura.
+const DOOR_CLEARANCE=37, STALL_LIMIT=.13*UNIT;
+const COLORS={red:'#e11d48',orange:'#f97316',yellow:'#eab308',green:'#22c55e',blue:'#2563eb'};
+const defaultConfig={maxPatients:20,triageCap:1,uciCap:2,studiesCap:5,polyCap:4,pctRed:1,pctOrange:4,pctYellow:25,pctGreen:65,pctBlue:5};
+let config={...defaultConfig},running=false,paused=false,speed=1.15,clock=0,last=performance.now(),spawnAt=0,seq=0;
+const patients=[], totals={red:0,orange:0,yellow:0,green:0,blue:0};
+const rooms={
+ derivados:{x:40,y:25,w:1040,h:65,name:'Discharged / Referred'},
+ uci:{x:40,y:125,w:210,h:110,name:'Life Threatening Area'},
+ studies:{x:285,y:125,w:255,h:110,name:'Urgent Area'},
+ poly:{x:575,y:125,w:505,h:110,name:'Semi-Urgent & Non-Urgent Area'},
+ classified:{x:40,y:275,w:1040,h:135,name:'Triaged'},
+ triage:{x:455,y:455,w:210,h:66,name:'Triage'},
+ identification:{x:140,y:570,w:840,h:94,name:'Registration'},
+ exterior:{x:40,y:720,w:1040,h:85,name:'Outside'}
+};
+const portal={entry:{x:560,y:720},idBottom:{x:560,y:664},idTop:{x:560,y:570},triBottom:{x:560,y:521},triTop:{x:560,y:455},classBottom:{x:560,y:410},uciBottom:{x:145,y:235},studiesBottom:{x:412,y:235},polyBottom:{x:820,y:235},uciTop:{x:145,y:125},studiesTop:{x:412,y:125},polyTop:{x:820,y:125}};
+const regions={uci:{x:52,y:298,w:312,h:99},studies:{x:392,y:298,w:313,h:99},poly:{x:733,y:298,w:334,h:99}};
+function positions(rect,dx=20,dy=20,top=24,bottom=11){
+ const result=[];for(let y=rect.y+top;y<=rect.y+rect.h-bottom;y+=dy)
+ for(let x=rect.x+15;x<=rect.x+rect.w-15;x+=dx) result.push({x,y});
+ return result;
+}
+const seats={
+ identification:positions(rooms.identification,20,20,24,9).filter(s=>Math.abs(s.x-560)>40),
+ triage:positions(rooms.triage,20,19,25,4).filter(s=>Math.abs(s.x-560)>15),
+ uci:positions(rooms.uci,20,19,29,7),
+ studies:positions(rooms.studies,20,19,29,7),
+ poly:positions(rooms.poly,20,19,29,7),
+ classUci:positions(regions.uci,20,19,0,0),
+ classStudies:positions(regions.studies,20,19,0,0),
+ classPoly:positions(regions.poly,20,19,0,0)
+};
+const constraints={maxPatients:[1,99],triageCap:[1,seats.triage.length],uciCap:[1,seats.uci.length],studiesCap:[1,seats.studies.length],polyCap:[1,seats.poly.length]};
+const fields=[['maxPatients','Max. Number of Patients','capacity'],['triageCap','Triage Capacity','capacity'],['uciCap','Life Threatening Facilities','capacity'],['studiesCap','Observation Facilities','capacity'],['polyCap','General Health Services','capacity'],['pctRed','Immediate: Life Threatening','intake'],['pctOrange','Emergency: Could Become Life Threatening','intake'],['pctYellow','Urgent: Not Life Threatening','intake'],['pctGreen','Semi Urgent: Not Life Threatening','intake'],['pctBlue','Non-Urgent: Needs Treatment When Time Permits','intake']];
+// Sections shown in the set-up and live parameter panels, in display order.
+const fieldGroups=[['capacity','Capacity'],['intake','Patient Intake (%)']];
+// Triage colour for each intake label (styled by the .lbl-* classes).
+const labelColour={pctRed:'red',pctOrange:'orange',pctYellow:'yellow',pctGreen:'green',pctBlue:'blue'};
+function form(prefix,element){element.innerHTML='';
+ for(const [groupKey,groupTitle] of fieldGroups){
+  const fs=document.createElement('fieldset');fs.className='group';
+  const legend=document.createElement('legend');legend.textContent=groupTitle;fs.append(legend);
+  const box=document.createElement('div');box.className='groupFields';fs.append(box);
+  for(const [key,label,group] of fields){if(group!==groupKey)continue;const l=document.createElement('label');l.textContent=label;if(labelColour[key])l.className='lbl-'+labelColour[key];const input=document.createElement('input');input.type='number';input.step='1';input.id=prefix+key;input.min=(constraints[key]||[0,100])[0];input.max=(constraints[key]||[0,100])[1];input.value=config[key];l.append(input);box.append(l);}
+  if(prefix==='live_'&&groupKey==='capacity'){const div=document.createElement('div');div.className='chip';div.innerHTML='Total Clinical Staff (Triage + ICU +  Observation + Hospital): <strong id="totalCapacity"></strong>';div.style.gridColumn='1 / -1';div.style.justifyContent='flex-start';div.style.fontSize='14px';box.append(div);}
+  element.append(fs);
+ }}
+form('init_',$('initialGrid'));form('live_',$('liveGrid'));document.getElementById('totalCapacity').textContent=config.triageCap+config.uciCap+config.studiesCap+config.polyCap;
+function getForm(prefix){const c={};for(const [k] of fields){const el=$(prefix+k),v=Number(el.value),[a,b]=constraints[k]||[0,100];if(!el.value.trim()||!Number.isInteger(v)||v<a||v>b)return {error:`${el.parentElement.firstChild.textContent}: must be a whole number between ${a} and ${b}.`};c[k]=v;}if(['pctRed','pctOrange','pctYellow','pctGreen','pctBlue'].reduce((s,k)=>s+c[k],0)!==100)return {error:'The five percentages must add up to exactly 100%.'};return {value:c};}
+function syncControls(){for(const [k] of fields){const el=$('live_'+k);if(document.activeElement!==el)el.value=config[k];}const c=$('totalCapacity');if(c)c.textContent=config.triageCap+config.uciCap+config.studiesCap+config.polyCap;}
+function applyForm(prefix,errorId){const result=getForm(prefix);if(result.error){$(errorId).textContent=result.error;return false;}config=result.value;$(errorId).textContent='';syncControls();return true;}
+$('startBtn').onclick=()=>{if(!applyForm('init_','initialError'))return;reset();running=true;paused=false;$('pauseBtn').textContent='Pause';$('configModal').classList.add('hidden');};
+$('liveGrid').addEventListener('change',()=>{if(applyForm('live_','liveError')){$('liveStatus').textContent='Changes applied live.';}else{$('liveStatus').textContent='Correct the values to apply them.';}});
+$('speedSelect').onchange=e=>speed=Number(e.target.value);
+$('pauseBtn').onclick=()=>{if(!running)return;paused=!paused;$('pauseBtn').textContent=paused?'Resume':'Pause';};
+$('restartBtn').onclick=()=>{running=false;paused=false;reset();$('configModal').classList.remove('hidden');for(const [k] of fields)$('init_'+k).value=config[k];};
+$('themeSelect').onchange=e=>document.body.classList.toggle('dark',e.target.value==='dark');
+function reset(){patients.length=0;clock=0;spawnAt=0;seq=0;for(const k in totals)totals[k]=0;updateCounters();}
+const rand=(a,b)=>a+Math.random()*(b-a);
+const distance=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y);
+const occupied=(area)=>patients.filter(p=>p.reserve===area).length;
+const activeIds=(area)=>new Set(patients.filter(p=>p.seatArea===area).map(p=>p.seatIndex));
+function freeSeat(area,limit=seats[area].length){const used=activeIds(area);for(let i=0;i<Math.min(limit,seats[area].length);i++)if(!used.has(i))return i;return -1;}
+function seatPosition(p){return seats[p.seatArea][p.seatIndex];}
+function reserveSeat(p,area,limit){const i=freeSeat(area,limit);if(i<0)return false;p.seatArea=area;p.seatIndex=i;return true;}
+function freeSeatOf(p){p.seatArea=null;p.seatIndex=-1;}
+function available(area){return occupied(area)<config[area+'Cap'];}
+function colorDraw(p){return p.color?COLORS[p.color]:(document.body.classList.contains('dark')?'#f1f5f9':'#1f2937');}
+function setJourney(p,state,waypoints,limit=TRANSFER_LIMIT){p.state=state;p.route=waypoints.map(s=>({...s}));p.elapsed=0;p.transferLimit=limit;p.stall=0;}
+function waypoint(x,y){return {x,y};}
+function assignWaitingSeat(p,area){if(!reserveSeat(p,area))return false;p.x=seats[area][p.seatIndex].x;p.y=seats[area][p.seatIndex].y;return true;}
+// Aparición alternada entre los dos extremos, sin colas ni estado de espera exterior.
+function spawn(){if(patients.length>=config.maxPatients)return;const side=seq%2===0?'left':'right',x=side==='left'?60:1060;
+ const y=747+(seq%3)*19;const point={x,y};if(patients.some(p=>distance(p,point)<MIN+3))return;
+ const p={id:++seq,x,y,color:null,side,state:'entry',reserve:null,seatArea:null,seatIndex:-1,elapsed:0,waitTime:0,time:0,service:0,born:clock,route:[],dead:false,origin:null};
+ const offset=[-21,-7,7,21][p.id%4];
+ // Se admiten lógicamente directamente a Identificación y el recorrido cruza su puerta.
+ // Una reserva de silla evita intersecciones en el destino, aun si otro entra al mismo tiempo.
+ if(!reserveSeat(p,'identification'))return;
+ const dest=seatPosition(p);
+ setJourney(p,'entry',[waypoint(560+offset,y),waypoint(560+offset,704),waypoint(560+offset,671),waypoint(560+offset,641),waypoint(dest.x,641),dest],5.2*UNIT);
+ patients.push(p);
+}
+// Colas FIFO separadas de las posiciones animadas.
+function queueFor(state,area){return patients.filter(p=>p.state===state&&(!area||p.destination===area)).sort((a,b)=>a.queuedAt-b.queuedAt||a.id-b.id);}
+function admit(p,area,state,route){if(!available(area))return false;const idx=freeSeat(area,config[area+'Cap']);if(idx<0)return false;
+ freeSeatOf(p);p.seatArea=area;p.seatIndex=idx;p.reserve=area;p.waitTime=0;
+ setJourney(p,state,route(seatPosition(p)));return true;
+}
+function serviceEnter(p,area){p.state='care';p.elapsed=0;p.time=0;p.service=area==='uci'?rand(3,15)*UNIT:area==='studies'?rand(5,15)*UNIT:rand(1,8)*UNIT;p.x=seatPosition(p).x;p.y=seatPosition(p).y;}
+function priority(p){return p.color==='red'?0:p.color==='orange'?1:p.color==='yellow'?2:p.color==='green'?3:4;}
+function processAdmissions(){
+ // FIFO en Identificación: ocupación cuenta también pacientes en tránsito.
+ const entry=queueFor('waitingTriage');
+ for(const p of entry){if(!available('triage'))break;admit(p,'triage','toTriage',s=>[
+ waypoint(560,584),waypoint(560,554),waypoint(560,532),waypoint(560,506),s]);}
+ // Cada destino respeta su propia cola y, en UCI, primero prioridad clínica.
+ for(const area of ['uci','studies','poly']){
+  const ready=patients.filter(p=>p.state==='classifiedWait'&&p.destination===area&&p.time>=p.minWait).sort((a,b)=>priority(a)-priority(b)||a.queuedAt-b.queuedAt||a.id-b.id);
+  for(const p of ready){if(!available(area))break;
+   const opening=area==='uci'?portal.uciBottom:area==='studies'?portal.studiesBottom:portal.polyBottom;
+   admit(p,area,'toCare',s=>[waypoint(opening.x,290),waypoint(opening.x,255),waypoint(opening.x,230),waypoint(s.x,230),s]);
+  }
+ }
+}
+function chooseColor(){let n=Math.random()*100;for(const [k,key] of [['red','pctRed'],['orange','pctOrange'],['yellow','pctYellow'],['green','pctGreen'],['blue','pctBlue']]){n-=config[key];if(n<0)return k;}return 'blue';}
+function finishTriage(p){const color=chooseColor();p.color=color;totals[color]++;p.reserve=null;p.destination=color==='red'||color==='orange'?'uci':color==='yellow'?'studies':'poly';
+ const waitArea='class'+p.destination[0].toUpperCase()+p.destination.slice(1);
+ // Las reservas de Clasificados se toman ya al finalizar Triaje.
+ if(!reserveSeat(p,waitArea)){
+  // Si la zona está excepcionalmente saturada, permanece en la silla de Triaje
+  // (sin consumir un nuevo cupo) hasta que haya posición real disponible.
+  p.state='classSeatPending';p.pendingArea=waitArea;return;
+ }
+ startClassTransfer(p);
+}
+function startClassTransfer(p){const s=seatPosition(p);p.reserve=null;
+ setJourney(p,'toClassified',[waypoint(560,440),waypoint(560,420),waypoint(560,390),waypoint(s.x,390),s]);}
+function finishClassified(p){p.state='classifiedWait';p.time=0;p.elapsed=0;p.queuedAt=clock;p.minWait=p.destination==='uci'?0:p.destination==='studies'?2*UNIT:4*UNIT;p.x=seatPosition(p).x;p.y=seatPosition(p).y;}
+// Un paciente en circulación nunca se convierte en una silla ni en una barrera.
+// Se detecta el atasco incluso si sucede exactamente en un punto de paso.
+function isMoving(p){return ['entry','toTriage','toClassified','toCare','toDerivados'].includes(p.state);}
+function inDoor(p){const points=[portal.entry,portal.idBottom,portal.idTop,portal.triBottom,portal.triTop,portal.classBottom,portal.uciBottom,portal.studiesBottom,portal.polyBottom,portal.uciTop,portal.studiesTop,portal.polyTop];return points.some(d=>Math.abs(p.x-d.x)<DOOR_CLEARANCE&&Math.abs(p.y-d.y)<DOOR_CLEARANCE);}
+function moveAlong(p,dt){let remaining=dt*86,iterations=0,moved=0;
+ while(p.route.length&&remaining>0&&iterations++<12){const t=p.route[0],d=distance(p,t);if(d<.001){p.route.shift();continue;}
+ const step=Math.min(d,remaining),next={x:p.x+(t.x-p.x)*step/d,y:p.y+(t.y-p.y)*step/d};
+ const obstructed=patients.some(other=>other!==p&&!other.dead&&distance(other,next)<MIN);
+ if(obstructed)break;
+ p.x=next.x;p.y=next.y;moved+=step;remaining-=step;if(step>=d-.001)p.route.shift();else break;
+ }
+ p.stall=moved<.1?p.stall+dt:0;
+ return p.route.length===0;
+}
+// La silla reservada es el estado definitivo; una puerta es exclusivamente tránsito.
+// Si el movimiento visual se atasca, se completa la transferencia lógicamente.
+function completeTransfer(p){
+ if(p.state==='toDerivados'){
+  // Derivados no usa sillas: se le asigna una posición libre hasta que desaparezca.
+  const center=p.derPos;
+  const choices=[];for(let row=0;row<3;row++)for(let col=-7;col<=7;col++)choices.push({x:Math.max(57,Math.min(1063,center.x+col*MIN)),y:46+row*19});
+  const spot=choices.find(s=>patients.every(q=>q===p||q.dead||distance(q,s)>=MIN))||center;
+  p.x=spot.x;p.y=spot.y;p.route=[];finishJourney(p);return;
+ }
+ if(!p.seatArea||p.seatIndex<0)return;
+ const destination=seatPosition(p);
+ // La plaza es exclusiva por reserva. Los otros pacientes en movimiento
+ // deben liberar el destino, no retener al titular en una puerta.
+ for(const q of patients){if(q===p||q.dead||distance(q,destination)>=MIN)continue;
+  if(isMoving(q)&&q.seatArea&&q.seatIndex>=0){const target=seatPosition(q);
+   if(distance(target,destination)>=MIN){q.x=target.x;q.y=target.y;q.route=[];finishJourney(q);}
+  }
+ }
+ if(patients.some(q=>q!==p&&!q.dead&&distance(q,destination)<MIN))return;
+ p.x=destination.x;p.y=destination.y;p.route=[];finishJourney(p);
+}
+function finishJourney(p){if(p.state==='entry'){p.state='waitingTriage';p.queuedAt=clock;p.time=0;}
+ else if(p.state==='toTriage'){p.state='triage';p.time=0;}
+ else if(p.state==='toClassified')finishClassified(p);
+ else if(p.state==='toCare')serviceEnter(p,p.reserve);
+ else if(p.state==='toDerivados'){p.state='derivados';p.time=0;p.service=p.origin==='poly'?UNIT:rand(2,5)*UNIT;}
+}
+function safeFinish(p){completeTransfer(p);}
+function nextDerivados(p){const area=p.reserve;p.origin=area;const x=area==='uci'?145:area==='studies'?412:820;
+ p.reserve=null;freeSeatOf(p);p.derPos={x:x+((p.id%5)-2)*19,y:61};
+ setJourney(p,'toDerivados',[waypoint(x,141),waypoint(x,115),waypoint(x,94),p.derPos],3.5*UNIT);
+}
+function step(dt){clock+=dt;
+ if(clock>=spawnAt&&patients.length<config.maxPatients){spawn();spawnAt=clock+rand(.55,1.25);}
+ processAdmissions();
+ for(const p of patients){p.elapsed+=dt;
+  if(['entry','toTriage','toClassified','toCare','toDerivados'].includes(p.state)){
+   if(moveAlong(p,dt))finishJourney(p);
+   else if(p.elapsed>=p.transferLimit||p.stall>=STALL_LIMIT||(inDoor(p)&&p.stall>=.05*UNIT))safeFinish(p);
+  }else if(p.state==='waitingTriage'){p.time+=dt;}
+  else if(p.state==='triage'){p.time+=dt;if(p.time>=UNIT)finishTriage(p);}
+  else if(p.state==='classSeatPending'){
+   if(reserveSeat(p,p.pendingArea))startClassTransfer(p);
+  }else if(p.state==='classifiedWait'){p.time+=dt;}
+  else if(p.state==='care'){p.time+=dt;if(p.time>=p.service)nextDerivados(p);}
+  else if(p.state==='derivados'){p.time+=dt;if(p.time>=p.service)p.dead=true;}
+ }
+ // Segundo barrido: los que fueron frenados por otros móviles ya reubicados avanzan.
+ for(const p of patients)if(isMoving(p)&&(p.elapsed>=p.transferLimit||p.stall>=STALL_LIMIT))safeFinish(p);
+ for(let i=patients.length-1;i>=0;i--)if(patients[i].dead)patients.splice(i,1);
+ processAdmissions();updateCounters();
+}
+function updateCounters(){$('activeCount').textContent=patients.length;for(const k of ['Red','Orange','Yellow','Green','Blue'])$('cnt'+k).textContent=totals[k.toLowerCase()];}
+function palette(){return document.body.classList.contains('dark')?{bg:'#0b1220',room:'#172033',wall:'#e5e7eb',text:'#f1f5f9',sub:'#cbd5e1',door:'#60a5fa',chair:'#334155',panel:'#111827',guide:'#38bdf855',accent:'#22c55e'}:{bg:'#fbfdff',room:'#fff',wall:'#172033',text:'#111827',sub:'#475569',door:'#2563eb',chair:'#e2e8f0',panel:'#f8fafc',guide:'#93c5fd99',accent:'#0ea5e9'};}
+function line(a,b,c,width=3){ctx.strokeStyle=c;ctx.lineWidth=width;ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.stroke();}
+// Stage outline: a dotted rounded box around every room in the stage (y1..y2), with the
+// stage name written whole, on one line, in the column to the left of the rooms.
+// The rooms and patients are drawn shifted right by SCENE_DX to free that column; the
+// simulation itself (seats, routes, collisions) still uses the original coordinates.
+const SCENE_DX=136,STAGE_LEFT=24,STAGE_RIGHT=1228,STAGE_LABEL_X=100;
+function drawStage(y1,y2,label,p){
+ const dark=document.body.classList.contains('dark');
+ ctx.save();
+ ctx.strokeStyle=p.door;ctx.lineWidth=2.5;ctx.lineCap='round';ctx.setLineDash([0.1,7]);
+ ctx.beginPath();ctx.roundRect(STAGE_LEFT,y1,STAGE_RIGHT-STAGE_LEFT,y2-y1,14);ctx.stroke();
+ ctx.restore();
+ ctx.fillStyle=dark?'#fca5a5':'#991b1b';ctx.font='bold 17px system-ui';ctx.textAlign='center';ctx.textBaseline='middle';
+ ctx.fillText(label,STAGE_LABEL_X,(y1+y2)/2);
+ ctx.textBaseline='alphabetic';
+}
+// Process-style block arrow in the stage-name column, from one stage name to the next.
+// yFrom/yTo are the two names' centres; the arrow stops short of each so it never covers text.
+function drawFlowArrow(yFrom,yTo,p){
+ const x=STAGE_LABEL_X,gap=20,shaft=7,head=16,headLen=18,dir=Math.sign(yTo-yFrom);
+ const y1=yFrom+dir*gap,y2=yTo-dir*gap,neck=y2-dir*headLen;
+ ctx.save();
+ ctx.fillStyle=p.door+'cc';ctx.strokeStyle=p.door;ctx.lineWidth=1.5;ctx.lineJoin='round';
+ ctx.beginPath();
+ ctx.moveTo(x-shaft,y1);ctx.lineTo(x-shaft,neck);ctx.lineTo(x-head,neck);ctx.lineTo(x,y2);
+ ctx.lineTo(x+head,neck);ctx.lineTo(x+shaft,neck);ctx.lineTo(x+shaft,y1);ctx.closePath();
+ ctx.fill();ctx.stroke();
+ ctx.restore();
+}
+// Room tint plus caption. pos 'bottom' puts the caption just above the room's bottom wall
+// (drawn later by drawCaption, after the seats); 'top' keeps it under the name tag.
+const bottomCaptions=[];
+function sectorTint(room,label,color,p,alpha='16',pos='bottom'){
+ ctx.fillStyle=color+alpha;ctx.fillRect(room.x+6,room.y+10,room.w-12,room.h-16);
+ if(!label)return;
+ if(pos==='bottom'){bottomCaptions.push([room,label]);return;}
+ ctx.fillStyle=p.sub;ctx.font='600 11px system-ui';ctx.textAlign='center';ctx.fillText(label,room.x+room.w/2,room.y+34);
+}
+// Split text into lines that each fit within maxWidth (uses the current ctx.font).
+function wrapText(text,maxWidth){const lines=[];let cur='';
+ for(const word of text.split(' ')){const test=cur?cur+' '+word:word;
+  if(cur&&ctx.measureText(test).width>maxWidth){lines.push(cur);cur=word;}else cur=test;}
+ if(cur)lines.push(cur);return lines;}
+// Text with a halo in the room colour so it stays readable over seats and borders.
+function haloText(text,x,y,fill,p){ctx.lineJoin='round';ctx.strokeStyle=p.room;ctx.lineWidth=4;ctx.strokeText(text,x,y);ctx.fillStyle=fill;ctx.fillText(text,x,y);}
+// Bottom caption, centred above the bottom wall; wraps onto extra lines (stacked upwards)
+// when the room is too narrow, instead of shrinking or spilling past the walls.
+function drawCaption(room,label,p){
+ ctx.save();ctx.font='600 11px system-ui';ctx.textAlign='center';
+ const lines=wrapText(label,room.w-16),x=room.x+room.w/2,bottom=room.y+room.h-6;
+ lines.forEach((t,i)=>haloText(t,x,bottom-(lines.length-1-i)*13,p.sub,p));
+ ctx.restore();
+}
+// Occupancy count as a small tag in the room's top-right corner, just below the name tag line.
+// onWall puts it on the top wall's right end instead (used where seats fill the top-right corner).
+function drawCountTag(room,text,p,onWall=false){
+ ctx.save();ctx.font='bold 11px system-ui';const w=ctx.measureText(text).width+12,x=room.x+room.w-w-8,y=onWall?room.y-1:room.y+20;
+ ctx.fillStyle=p.panel;ctx.strokeStyle=p.sub+'33';ctx.lineWidth=1;ctx.beginPath();ctx.roundRect(x,y,w,17,5);ctx.fill();ctx.stroke();
+ ctx.fillStyle=p.door;ctx.textAlign='center';ctx.fillText(text,x+w/2,y+12.5);ctx.restore();
+}
+function drawRoom(room,p){ctx.fillStyle=p.room;ctx.strokeStyle=p.wall;ctx.lineWidth=4;ctx.fillRect(room.x,room.y,room.w,room.h);
+ const topGaps=[],bottomGaps=[];
+ if(room===rooms.derivados)bottomGaps.push(145,412,820);
+ if(room===rooms.uci){topGaps.push(145);bottomGaps.push(145);}
+ if(room===rooms.studies){topGaps.push(412);bottomGaps.push(412);}
+ if(room===rooms.poly){topGaps.push(820);bottomGaps.push(820);}
+ if(room===rooms.classified){topGaps.push(145,412,820);bottomGaps.push(560);}
+ if(room===rooms.triage){topGaps.push(560);bottomGaps.push(560);}
+ if(room===rooms.identification){topGaps.push(560);bottomGaps.push(560);}
+ if(room===rooms.exterior)topGaps.push(560);
+ function horizontal(y,gaps){let x=room.x;for(const center of gaps.sort((a,b)=>a-b)){line({x,y},{x:center-29,y},p.wall,4);x=center+29;}line({x,y},{x:room.x+room.w,y},p.wall,4);for(const center of gaps){line({x:center-26,y:y-1},{x:center+26,y:y-1},p.door,1);}}
+ horizontal(room.y,topGaps);horizontal(room.y+room.h,bottomGaps);
+ line({x:room.x,y:room.y},{x:room.x,y:room.y+room.h},p.wall,4);
+ line({x:room.x+room.w,y:room.y},{x:room.x+room.w,y:room.y+room.h},p.wall,4);
+ // Name tag sized to the measured text, so long names are never clipped by a fixed width.
+ const name=room.name.trim();ctx.font='bold 15px system-ui';
+ const tagW=Math.max(110,ctx.measureText(name).width+18);
+ ctx.fillStyle=p.panel;ctx.strokeStyle=p.sub+'33';ctx.lineWidth=1;
+ ctx.beginPath();ctx.roundRect(room.x+room.w/2-tagW/2,room.y-2,tagW,20,6);ctx.fill();ctx.stroke();
+ ctx.fillStyle=p.text;ctx.textAlign='center';ctx.fillText(name,room.x+room.w/2,room.y+13);
+}
+// All drawing uses a fixed 1240×850 plan; fitCanvas scales it to the on-screen size
+// at full device resolution so text and lines stay sharp at any size.
+const VIEW_W=1240,VIEW_H=850;
+function fitCanvas(){const r=canvas.getBoundingClientRect(),dpr=window.devicePixelRatio||1;
+ const w=Math.max(1,Math.round(r.width*dpr)),h=Math.max(1,Math.round(r.height*dpr));
+ if(canvas.width!==w||canvas.height!==h){canvas.width=w;canvas.height=h;}
+ ctx.setTransform(canvas.width/VIEW_W,0,0,canvas.height/VIEW_H,0,0);}
+function drawPlan(){const p=palette();ctx.fillStyle=p.bg;ctx.fillRect(0,0,VIEW_W,VIEW_H);
+ ctx.save();ctx.translate(SCENE_DX,0);
+ // Pasillos conectados entre las aberturas, sin paredes atravesadas.
+ for(const [a,b] of [[portal.entry,portal.idBottom],[portal.idTop,portal.triBottom],[portal.triTop,portal.classBottom],
+ [{x:145,y:275},portal.uciBottom],[{x:412,y:275},portal.studiesBottom],[{x:820,y:275},portal.polyBottom],
+ [portal.uciTop,{x:145,y:90}],[portal.studiesTop,{x:412,y:90}],[portal.polyTop,{x:820,y:90}]]){
+  ctx.strokeStyle=p.guide;ctx.lineWidth=2;ctx.setLineDash([5,6]);ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.stroke();ctx.setLineDash([]);}
+ for(const key of ['derivados','uci','studies','poly','classified','triage','identification','exterior'])drawRoom(rooms[key],p);
+ sectorTint(rooms.derivados,'Patients out of Emergency Room: Referred to Hospital for Admission or Sent Back Home: Triage Process Completed','#e5e7eb',p, document.body.classList.contains('dark')?'10':'20');
+ sectorTint(rooms.uci,'Allocated Life-Threatening Patients','#dbeafe',p);
+ sectorTint(rooms.studies,'Allocated Urgent Patients','#fef3c7',p);
+ sectorTint(rooms.poly,'Allocated Semi-Urgent & Non-Urgent Patients','#dcfce7',p);
+ sectorTint(rooms.classified,'Prioritised Patients in Waiting Room','#f8fafc',p, document.body.classList.contains('dark')?'06':'45');
+ sectorTint(rooms.triage,'Initial Observation','#dbeafe',p, document.body.classList.contains('dark')?'14':'22');
+ sectorTint(rooms.identification,'Reception and Waiting Area','#dbeafe',p, document.body.classList.contains('dark')?'10':'16');
+ sectorTint(rooms.exterior,'Arriving Patients (following distribution parameters)','#f3f4f6',p, document.body.classList.contains('dark')?'06':'35');
+ // Distribución por prioridad de Clasificados.
+ const regionLabels=[['uci','Life-Threatening','#e11d48'],['studies','Urgent','#eab308'],['poly','Semi-Urgent & Non-Urgent','#22c55e']];
+ for(const [key,,color] of regionLabels){const r=regions[key];ctx.fillStyle=color+'14';ctx.fillRect(r.x,r.y,r.w,r.h);ctx.strokeStyle=color+'40';ctx.lineWidth=1;ctx.strokeRect(r.x,r.y,r.w,r.h);}
+ for(const [area,spots] of Object.entries(seats)){if(area==='identification'||area==='triage'||['uci','studies','poly'].includes(area)||area.startsWith('class')){
+ const visible=area==='triage'?config.triageCap:area==='uci'?config.uciCap:area==='studies'?config.studiesCap:area==='poly'?config.polyCap:spots.length;
+ const used=activeIds(area);for(let i=0;i<Math.min(visible,spots.length);i++){const s=spots[i];ctx.fillStyle=used.has(i)?p.door+'55':p.chair;ctx.strokeStyle=p.sub+'55';ctx.lineWidth=.7;ctx.beginPath();ctx.roundRect(s.x-8,s.y-7,16,14,3);ctx.fill();ctx.stroke();}
+ }}
+ for(const [key,label] of [['triage','triageCap'],['uci','uciCap'],['studies','studiesCap'],['poly','polyCap']])drawCountTag(rooms[key],occupied(key)+' / '+config[label],p);
+ // Head counts for rooms without a capacity limit. A patient counts from the moment a seat
+ // there is reserved (including while walking to it) until they leave for the next stage.
+ const inArea=(...areas)=>patients.filter(q=>areas.includes(q.seatArea)).length;
+ drawCountTag(rooms.identification,String(inArea('identification')),p,true);
+ drawCountTag(rooms.classified,String(inArea('classUci','classStudies','classPoly')),p,true);
+ // Triaged sub-area labels at the bottom of each sub-area, above the room caption.
+ ctx.save();ctx.font='bold 12px system-ui';ctx.textAlign='center';
+ // Each label is followed by a small counter; the pair is centred in the sub-area.
+ const subArea={uci:'classUci',studies:'classStudies',poly:'classPoly'};
+ for(const [key,label] of regionLabels){const r=regions[key],y=r.y+r.h-8,n=String(inArea(subArea[key]));
+  ctx.font='bold 12px system-ui';const lw=ctx.measureText(label).width;
+  ctx.font='bold 11px system-ui';const tw=ctx.measureText(n).width+12;
+  const x0=r.x+r.w/2-(lw+6+tw)/2;
+  ctx.font='bold 12px system-ui';ctx.textAlign='left';haloText(label,x0,y,p.sub,p);
+  ctx.fillStyle=p.panel;ctx.strokeStyle=p.sub+'33';ctx.lineWidth=1;ctx.beginPath();ctx.roundRect(x0+lw+6,y-12,tw,16,5);ctx.fill();ctx.stroke();
+  ctx.font='bold 11px system-ui';ctx.textAlign='center';ctx.fillStyle=p.door;ctx.fillText(n,x0+lw+6+tw/2,y);}
+ ctx.restore();
+ for(const [room,label] of bottomCaptions)drawCaption(room,label,p);
+ bottomCaptions.length=0;
+ ctx.fillStyle=p.sub;ctx.textAlign='center';ctx.font='bold 11px system-ui';ctx.fillText('Walk-in Arrivals from both ends, no queueing',560,833);
+ drawDelayBox(p);drawDelayChart(p);
+ ctx.restore();
+ // Each box encloses its rooms with a small margin and sits in the gap between stages.
+ const stages=[[12,104,'Refer'],[111,247,'Stabilise'],[255,535,'Triage'],[549,818,'Register']];
+ // Refer = Discharged / Referred; Stabilise = ICU, Observation, Clinic;
+ // Triage = Triaged waiting area + Triage; Register = Registration + Outside.
+ for(const [y1,y2,label] of stages)drawStage(y1,y2,label,p);
+ // Patient journey: Register → Triage → Stabilise → Refer (bottom to top).
+ const mid=i=>(stages[i][0]+stages[i][1])/2;
+ for(let i=stages.length-1;i>0;i--)drawFlowArrow(mid(i),mid(i-1),p);
+}
+// Expected process times, in UNITs. A patient over the limit for their current stage is
+// outlined in red and counted in the "Outside Expected Times" box.
+const TRIAGE_WAIT_LIMIT=10;                                                  // Registration → Triage
+const ALLOCATION_WAIT_LIMIT={red:2,orange:2,yellow:15,green:50,blue:50};     // Triaged → allocated area
+const ATTENTION_LIMIT={uci:10,studies:12,poly:6};                            // time being attended in each area
+// Which expected time the patient has exceeded: 'registration', 'triaged', 'allocated' or null.
+function lateKind(q){
+ if(q.state==='waitingTriage'&&q.time>TRIAGE_WAIT_LIMIT*UNIT)return 'registration';
+ if(q.state==='classifiedWait'&&q.time>ALLOCATION_WAIT_LIMIT[q.color]*UNIT)return 'triaged';
+ if(q.state==='care'&&q.time>ATTENTION_LIMIT[q.reserve]*UNIT)return 'allocated';
+ return null;
+}
+// Shared figures for the "Outside Expected Times" box and its bar chart.
+function delayStats(){
+ const waiting=patients.filter(q=>q.seatArea==='identification'||String(q.seatArea).startsWith('class')).length;
+ const late={registration:0,triaged:0,allocated:0};for(const q of patients){const k=lateKind(q);if(k)late[k]++;}
+ return {waiting,...late,total:late.registration+late.triaged+late.allocated};
+}
+const lateRed=()=>document.body.classList.contains('dark')?'#f87171':'#dc2626';
+// Both boxes sit level with the Triage room, inside the Triage stage outline:
+// the counters to its left, the bar chart to its right.
+const INFO_Y=418,INFO_H=112,DELAY_BOX={x:40,w:395},CHART_BOX={x:685,w:395};
+function infoPanel(box,title,p){
+ ctx.fillStyle=p.panel;ctx.strokeStyle=p.sub+'55';ctx.lineWidth=1.5;ctx.beginPath();ctx.roundRect(box.x,INFO_Y,box.w,INFO_H,10);ctx.fill();ctx.stroke();
+ ctx.fillStyle=p.text;ctx.font='bold 13px system-ui';ctx.textAlign='center';ctx.fillText(title,box.x+box.w/2,INFO_Y+17);
+}
+function drawDelayBox(p){
+ const st=delayStats(),red=lateRed(),{x,w}=DELAY_BOX,y=INFO_Y,h=INFO_H;
+ ctx.save();infoPanel(DELAY_BOX,'Outside Expected Times',p);
+ const rows=[['(1) Patients Waiting for Attention',st.waiting,p.text],
+  ['(2) Registered Patients Exceeding Triage Time',st.registration,red],
+  ['(3) Triaged Patients Exceeding Allocation Time',st.triaged,red],
+  ['(4) Allocated Patients Exceeding Attention Time',st.allocated,red]];
+ rows.forEach(([label,n,c],i)=>{const ry=y+36+i*16;
+  ctx.font='600 11.5px system-ui';ctx.textAlign='left';ctx.fillStyle=p.sub;ctx.fillText(label,x+12,ry);
+  ctx.font='bold 12px system-ui';ctx.textAlign='right';ctx.fillStyle=c;ctx.fillText(n,x+w-12,ry);});
+ ctx.strokeStyle=p.sub+'44';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(x+10,y+h-21);ctx.lineTo(x+w-10,y+h-21);ctx.stroke();
+ ctx.font='bold 12px system-ui';ctx.textAlign='left';ctx.fillStyle=p.text;ctx.fillText('Total Patients Exceeding Expected Process Times',x+12,y+h-7);
+ ctx.textAlign='right';ctx.fillStyle=red;ctx.fillText(st.total,x+w-12,y+h-7);
+ ctx.restore();
+}
+// Horizontal bar chart of (1)-(4). All bars share one scale, 0 to "Max. Number of Patients",
+// so bar lengths stay stable and comparable as patients come and go.
+function drawDelayChart(p){
+ const st=delayStats(),red=lateRed(),{x,w}=CHART_BOX,y=INFO_Y,h=INFO_H;
+ const max=Math.max(1,config.maxPatients),barX=x+140,barW=w-140-34,barH=10;
+ ctx.save();infoPanel(CHART_BOX,'Outside Expected Times: Chart',p);
+ const rows=[['(1) Waiting',st.waiting,p.door],['(2) Over Triage',st.registration,red],['(3) Over Allocation',st.triaged,red],['(4) Over Attention',st.allocated,red]];
+ // Faint track behind each bar shows the full scale.
+ rows.forEach(([label,n,c],i)=>{const cy=y+36+i*17,top=cy-barH+1;
+  ctx.font='600 11px system-ui';ctx.textAlign='left';ctx.fillStyle=p.sub;ctx.fillText(label,x+12,cy);
+  ctx.fillStyle=p.sub+'1f';ctx.beginPath();ctx.roundRect(barX,top,barW,barH,4);ctx.fill();
+  const len=Math.min(1,n/max)*barW;
+  if(len>0){ctx.fillStyle=c;ctx.beginPath();ctx.roundRect(barX,top,Math.max(len,4),barH,[0,4,4,0]);ctx.fill();}
+  ctx.font='bold 11px system-ui';ctx.fillStyle=p.text;ctx.fillText(n,barX+barW+6,cy);});
+ // Baseline and scale note.
+ ctx.strokeStyle=p.sub+'88';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(barX,y+25);ctx.lineTo(barX,y+36+3*17+3);ctx.stroke();
+ ctx.font='10.5px system-ui';ctx.fillStyle=p.sub;ctx.textAlign='left';ctx.fillText('0',barX-2,y+h-7);
+ ctx.textAlign='right';ctx.fillText(max+' patients (Max. Number of Patients)',barX+barW,y+h-7);
+ ctx.restore();
+}
+function drawPatients(){const p=palette();ctx.save();ctx.translate(SCENE_DX,0);for(const patient of patients){ctx.beginPath();ctx.arc(patient.x,patient.y,R,0,Math.PI*2);ctx.fillStyle=colorDraw(patient);ctx.fill();
+ const late=lateKind(patient)!==null;
+ ctx.strokeStyle=late?'#ef4444':p.wall;ctx.lineWidth=late?3:1.2;ctx.stroke();}ctx.restore();}
+function frame(now){const dt=Math.min(.045,(now-last)/1000);last=now;if(running&&!paused)step(dt*speed);fitCanvas();drawPlan();drawPatients();requestAnimationFrame(frame);}
+// Size the plan to the monitor: the largest 1240×850 rectangle that fits the page width
+// and the window height left under the sticky header. Re-runs on window resize and when
+// the header changes height (e.g. its counters wrap onto a second row).
+const PLAN_MIN_W=700;
+function fitPlan(){
+ const wrap=document.querySelector('.canvasWrap'),header=document.querySelector('header');
+ const availW=wrap.clientWidth-20;                                   // wrap padding
+ const availH=window.innerHeight-header.offsetHeight-10-22-2-12;     // main padding, wrap padding+border, canvas border, breathing room
+ const w=Math.max(PLAN_MIN_W,Math.min(availW,availH*VIEW_W/VIEW_H));
+ canvas.style.width=Math.floor(w)+'px';
+}
+window.addEventListener('resize',fitPlan);
+new ResizeObserver(fitPlan).observe(document.querySelector('header'));
+fitPlan();
+syncControls();updateCounters();requestAnimationFrame(frame);
+</script>
+</body>
+</html>
