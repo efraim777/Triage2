@@ -331,7 +331,7 @@ const rooms={
  poly:{x:575,y:125,w:505,h:110,name:'Semi-Urgent & Non-Urgent Area'},
  classified:{x:40,y:275,w:1040,h:135,name:'Triaged'},
  triage:{x:455,y:455,w:210,h:66,name:'Triage'},
- identification:{x:140,y:570,w:840,h:94,name:'Registration'},
+ identification:{x:280,y:570,w:560,h:94,name:'Registration'},  // centred on the 560 door; sides hold the per-type charts
  exterior:{x:40,y:720,w:1040,h:85,name:'Outside'}
 };
 const portal={entry:{x:560,y:720},idBottom:{x:560,y:664},idTop:{x:560,y:570},triBottom:{x:560,y:521},triTop:{x:560,y:455},classBottom:{x:560,y:410},uciBottom:{x:145,y:235},studiesBottom:{x:412,y:235},polyBottom:{x:820,y:235},uciTop:{x:145,y:125},studiesTop:{x:412,y:125},polyTop:{x:820,y:125}};
@@ -639,7 +639,7 @@ function drawPlan(){const p=palette();ctx.fillStyle=p.bg;ctx.fillRect(0,0,VIEW_W
  for(const [room,label] of bottomCaptions)drawCaption(room,label,p);
  bottomCaptions.length=0;
  ctx.fillStyle=p.sub;ctx.textAlign='center';ctx.font='bold 11px system-ui';ctx.fillText('Walk-in Arrivals from both ends, no queueing',560,833);
- drawDelayBox(p);drawDelayChart(p);
+ drawDelayBox(p);drawDelayChart(p);drawTypeCharts(p);
  ctx.restore();
  // Each box encloses its rooms with a small margin and sits in the gap between stages.
  const stages=[[12,104,'Refer'],[111,247,'Stabilise'],[255,535,'Triage'],[549,818,'Register']];
@@ -710,6 +710,36 @@ function drawDelayChart(p){
  ctx.font='10.5px system-ui';ctx.fillStyle=p.sub;ctx.textAlign='left';ctx.fillText('0',barX-2,y+h-7);
  ctx.textAlign='right';ctx.fillText(max+' patients (Max. Number of Patients)',barX+barW,y+h-7);
  ctx.restore();
+}
+// Two per-type charts either side of Registration, inside the Register stage outline:
+// left = triaged patients over their allocation wait, right = allocated patients over
+// their attention (service) time. Both share one scale so their bars compare directly.
+const TYPE_ROWS=[['red','Immediate'],['orange','Emergency'],['yellow','Urgent'],['green','Semi-Urgent'],['blue','Non-Urgent']];
+const TYPE_CHART_Y=558,TYPE_CHART_H=154,TYPE_LEFT={x:40,w:230},TYPE_RIGHT={x:850,w:230};
+function lateByType(kind){const c={red:0,orange:0,yellow:0,green:0,blue:0};for(const q of patients)if(lateKind(q)===kind)c[q.color]++;return c;}
+function drawTypeChart(box,title,counts,max,p){
+ const {x,w}=box,y=TYPE_CHART_Y,h=TYPE_CHART_H,barX=x+84,barW=w-84-30,barH=10;
+ ctx.save();
+ ctx.fillStyle=p.panel;ctx.strokeStyle=p.sub+'55';ctx.lineWidth=1.5;ctx.beginPath();ctx.roundRect(x,y,w,h,10);ctx.fill();ctx.stroke();
+ ctx.fillStyle=p.text;ctx.font='bold 12px system-ui';ctx.textAlign='center';ctx.fillText(title,x+w/2,y+18);
+ TYPE_ROWS.forEach(([colour,label],i)=>{const cy=y+42+i*20,top=cy-barH+1,n=counts[colour];
+  ctx.font='600 11px system-ui';ctx.textAlign='left';ctx.fillStyle=p.sub;ctx.fillText(label,x+10,cy);
+  ctx.fillStyle=p.sub+'1f';ctx.beginPath();ctx.roundRect(barX,top,barW,barH,4);ctx.fill();
+  const len=Math.min(1,n/max)*barW;
+  if(len>0){ctx.fillStyle=COLORS[colour];ctx.beginPath();ctx.roundRect(barX,top,Math.max(len,4),barH,[0,4,4,0]);ctx.fill();}
+  ctx.font='bold 11px system-ui';ctx.fillStyle=p.text;ctx.fillText(n,barX+barW+6,cy);});
+ ctx.strokeStyle=p.sub+'88';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(barX,y+28);ctx.lineTo(barX,y+42+4*20+3);ctx.stroke();
+ ctx.font='10.5px system-ui';ctx.fillStyle=p.sub;ctx.textAlign='left';ctx.fillText('0',barX-2,y+h-8);
+ ctx.textAlign='right';ctx.fillText(max+' patients',barX+barW,y+h-8);
+ ctx.restore();
+}
+function drawTypeCharts(p){
+ const triaged=lateByType('triaged'),allocated=lateByType('allocated');
+ // Shared scale: at least 5, otherwise the largest bar across both charts (rounded up to 5).
+ const top=Math.max(...Object.values(triaged),...Object.values(allocated));
+ const max=Math.max(5,Math.ceil(top/5)*5);
+ drawTypeChart(TYPE_LEFT,'Triaged: Over Allocation Time',triaged,max,p);
+ drawTypeChart(TYPE_RIGHT,'Allocated: Over Service Time',allocated,max,p);
 }
 function drawPatients(){const p=palette();ctx.save();ctx.translate(SCENE_DX,0);for(const patient of patients){ctx.beginPath();ctx.arc(patient.x,patient.y,R,0,Math.PI*2);ctx.fillStyle=colorDraw(patient);ctx.fill();
  const late=lateKind(patient)!==null;
