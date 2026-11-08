@@ -332,7 +332,7 @@ const rooms={
  classified:{x:40,y:275,w:1040,h:135,name:'Triaged'},
  triage:{x:455,y:455,w:210,h:66,name:'Triage'},
  identification:{x:280,y:570,w:560,h:94,name:'Registration'},  // centred on the 560 door; sides hold the per-type charts
- exterior:{x:40,y:720,w:1040,h:85,name:'Outside'}
+ exterior:{x:40,y:720,w:660,h:85,name:'Outside'}  // narrowed; the within/outside chart sits to its right
 };
 const portal={entry:{x:560,y:720},idBottom:{x:560,y:664},idTop:{x:560,y:570},triBottom:{x:560,y:521},triTop:{x:560,y:455},classBottom:{x:560,y:410},uciBottom:{x:145,y:235},studiesBottom:{x:412,y:235},polyBottom:{x:820,y:235},uciTop:{x:145,y:125},studiesTop:{x:412,y:125},polyTop:{x:820,y:125}};
 const regions={uci:{x:52,y:298,w:312,h:99},studies:{x:392,y:298,w:313,h:99},poly:{x:733,y:298,w:334,h:99}};
@@ -363,7 +363,7 @@ function form(prefix,element){element.innerHTML='';
   const legend=document.createElement('legend');legend.textContent=groupTitle;fs.append(legend);
   const box=document.createElement('div');box.className='groupFields';fs.append(box);
   for(const [key,label,group] of fields){if(group!==groupKey)continue;const l=document.createElement('label');l.textContent=label;if(labelColour[key])l.className='lbl-'+labelColour[key];const input=document.createElement('input');input.type='number';input.step='1';input.id=prefix+key;input.min=(constraints[key]||[0,100])[0];input.max=(constraints[key]||[0,100])[1];input.value=config[key];l.append(input);box.append(l);}
-  if(prefix==='live_'&&groupKey==='capacity'){const div=document.createElement('div');div.className='chip';div.innerHTML='Total Clinical Staff (Triage + ICU +  Observation + Hospital): <strong id="totalCapacity"></strong>';div.style.gridColumn='1 / -1';div.style.justifyContent='flex-start';div.style.fontSize='14px';box.append(div);}
+  if(prefix==='live_'&&groupKey==='capacity'){const div=document.createElement('div');div.className='chip';div.innerHTML='Total Clinical Staff (Triage + Life Threatening + Observation + Semi &amp; Non Urgent): <strong id="totalCapacity"></strong>';div.style.gridColumn='1 / -1';div.style.justifyContent='flex-start';div.style.fontSize='14px';box.append(div);}
   element.append(fs);
  }}
 form('init_',$('initialGrid'));form('live_',$('liveGrid'));document.getElementById('totalCapacity').textContent=config.triageCap+config.uciCap+config.studiesCap+config.polyCap;
@@ -391,7 +391,7 @@ function setJourney(p,state,waypoints,limit=TRANSFER_LIMIT){p.state=state;p.rout
 function waypoint(x,y){return {x,y};}
 function assignWaitingSeat(p,area){if(!reserveSeat(p,area))return false;p.x=seats[area][p.seatIndex].x;p.y=seats[area][p.seatIndex].y;return true;}
 // Aparición alternada entre los dos extremos, sin colas ni estado de espera exterior.
-function spawn(){if(patients.length>=config.maxPatients)return;const side=seq%2===0?'left':'right',x=side==='left'?60:1060;
+function spawn(){if(patients.length>=config.maxPatients)return;const side=seq%2===0?'left':'right',x=side==='left'?rooms.exterior.x+20:rooms.exterior.x+rooms.exterior.w-20;  // just inside each end wall
  const y=747+(seq%3)*19;const point={x,y};if(patients.some(p=>distance(p,point)<MIN+3))return;
  const p={id:++seq,x,y,color:null,side,state:'entry',reserve:null,seatArea:null,seatIndex:-1,elapsed:0,waitTime:0,time:0,service:0,born:clock,route:[],dead:false,origin:null};
  const offset=[-21,-7,7,21][p.id%4];
@@ -639,7 +639,7 @@ function drawPlan(){const p=palette();ctx.fillStyle=p.bg;ctx.fillRect(0,0,VIEW_W
  for(const [room,label] of bottomCaptions)drawCaption(room,label,p);
  bottomCaptions.length=0;
  ctx.fillStyle=p.sub;ctx.textAlign='center';ctx.font='bold 11px system-ui';ctx.fillText('Walk-in Arrivals from both ends, no queueing',560,833);
- drawDelayBox(p);drawDelayChart(p);drawTypeCharts(p);
+ drawDelayBox(p);drawDelayChart(p);drawTypeCharts(p);drawWithinChart(p);
  ctx.restore();
  // Each box encloses its rooms with a small margin and sits in the gap between stages.
  const stages=[[12,104,'Refer'],[111,247,'Stabilise'],[255,535,'Triage'],[549,818,'Register']];
@@ -740,6 +740,34 @@ function drawTypeCharts(p){
  const max=Math.max(5,Math.ceil(top/5)*5);
  drawTypeChart(TYPE_LEFT,'Triaged: Over Allocation Time',triaged,max,p);
  drawTypeChart(TYPE_RIGHT,'Allocated: Over Service Time',allocated,max,p);
+}
+// Stacked bars to the right of Outside: for each timed stage, patients still within their
+// expected time vs those outside it (the red-outlined ones). Uses the same rules as lateKind().
+const WITHIN_BOX={x:718,y:716,w:362,h:96};
+function drawWithinChart(p){
+ const red=lateRed(),blue=p.door,{x,y,w,h}=WITHIN_BOX;
+ const stages=[['Registration','waitingTriage','registration'],['Triaged','classifiedWait','triaged'],['Allocated','care','allocated']];
+ const rows=stages.map(([label,state,kind])=>{let inT=0,out=0;for(const q of patients)if(q.state===state){if(lateKind(q)===kind)out++;else inT++;}return [label,inT,out];});
+ const top=Math.max(...rows.map(r=>r[1]+r[2])),max=Math.max(5,Math.ceil(top/5)*5);
+ const barX=x+84,barW=w-84-62,barH=10;
+ ctx.save();
+ ctx.fillStyle=p.panel;ctx.strokeStyle=p.sub+'55';ctx.lineWidth=1.5;ctx.beginPath();ctx.roundRect(x,y,w,h,10);ctx.fill();ctx.stroke();
+ ctx.fillStyle=p.text;ctx.font='bold 12px system-ui';ctx.textAlign='center';ctx.fillText('Within vs Outside Expected Time',x+w/2,y+16);
+ rows.forEach(([label,inT,out],i)=>{const cy=y+35+i*17,t=cy-barH+1;
+  ctx.font='600 11px system-ui';ctx.textAlign='left';ctx.fillStyle=p.sub;ctx.fillText(label,x+10,cy);
+  ctx.fillStyle=p.sub+'1f';ctx.beginPath();ctx.roundRect(barX,t,barW,barH,4);ctx.fill();
+  const wIn=inT/max*barW,wOut=out/max*barW,gap=inT&&out?2:0;
+  // Within segment from the baseline; outside segment stacked after it with a 2px gap.
+  if(inT){ctx.fillStyle=blue;ctx.beginPath();ctx.roundRect(barX,t,Math.max(wIn,3),barH,out?0:[0,4,4,0]);ctx.fill();}
+  if(out){ctx.fillStyle=red;ctx.beginPath();ctx.roundRect(barX+wIn+gap,t,Math.max(wOut-gap,3),barH,[0,4,4,0]);ctx.fill();}
+  ctx.font='bold 11px system-ui';ctx.fillStyle=p.text;ctx.fillText(inT,barX+barW+8,cy);
+  ctx.fillStyle=p.sub;ctx.fillText('/',barX+barW+28,cy);ctx.fillStyle=p.text;ctx.fillText(out,barX+barW+38,cy);});
+ // Legend and scale.
+ const ly=y+h-9;ctx.font='10.5px system-ui';ctx.textAlign='left';
+ ctx.fillStyle=blue;ctx.fillRect(x+10,ly-8,9,9);ctx.fillStyle=p.sub;ctx.fillText('Within',x+23,ly);
+ ctx.fillStyle=red;ctx.fillRect(x+66,ly-8,9,9);ctx.fillStyle=p.sub;ctx.fillText('Outside',x+79,ly);
+ ctx.textAlign='right';ctx.fillText('scale 0–'+max+' patients',barX+barW,ly);
+ ctx.restore();
 }
 function drawPatients(){const p=palette();ctx.save();ctx.translate(SCENE_DX,0);for(const patient of patients){ctx.beginPath();ctx.arc(patient.x,patient.y,R,0,Math.PI*2);ctx.fillStyle=colorDraw(patient);ctx.fill();
  const late=lateKind(patient)!==null;
